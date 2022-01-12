@@ -5,3 +5,7 @@
 [submodule "deep_sort/deep/reid"]
 	path = deep_sort/deep/reid
 	url = https://github.com/KaiyangZhou/deep-person-reid
+
+[submodule "Detic"]
+	path = Detic
+	url = https://github.com/facebookresearch/Detic
