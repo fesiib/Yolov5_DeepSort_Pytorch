@@ -51,7 +51,7 @@ def detect(opt):
                         max_dist=cfg.DEEPSORT.MAX_DIST,
                         max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
                         max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
-                        use_cuda=True)
+                        use_cuda=(opt.device != 'cpu'))
 
     # Initialize
     device = select_device(opt.device)
@@ -108,24 +108,24 @@ def detect(opt):
         model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
     dt, seen = [0.0, 0.0, 0.0, 0.0], 0
     for frame_idx, (path, img, im0s, vid_cap, s) in enumerate(dataset):
-        t1 = time_sync()
+        t1 = time_sync(device)
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
-        t2 = time_sync()
+        t2 = time_sync(device)
         dt[0] += t2 - t1
 
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if opt.visualize else False
         pred = model(img, augment=opt.augment, visualize=visualize)
-        t3 = time_sync()
+        t3 = time_sync(device)
         dt[1] += t3 - t2
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, opt.classes, opt.agnostic_nms, max_det=opt.max_det)
-        dt[2] += time_sync() - t3
+        dt[2] += time_sync(device) - t3
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -157,9 +157,9 @@ def detect(opt):
                 clss = det[:, 5]
 
                 # pass detections to deepsort
-                t4 = time_sync()
+                t4 = time_sync(device)
                 outputs = deepsort.update(xywhs.cpu(), confs.cpu(), clss.cpu(), im0)
-                t5 = time_sync()
+                t5 = time_sync(device)
                 dt[3] += t5 - t4
 
                 # draw boxes for visualization
