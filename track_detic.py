@@ -3,6 +3,8 @@ import json
 import os
 import sys
 
+sys.path.insert(0, './yolov5')
+
 import argparse
 from pathlib import Path
 import cv2
@@ -24,6 +26,9 @@ from detectron2.utils.logger import setup_logger
 from detectron2.utils.video_visualizer import VideoVisualizer
 from detectron2.engine.defaults import DefaultPredictor
 from detectron2.utils.visualizer import ColorMode
+from detectron2.structures.instances import Instances
+from detectron2.structures.boxes import Boxes
+from yolov5.utils.plots import Annotator, colors
 
 #sys.path.append('./Detic')
 sys.path.append('./Detic/third_party/CenterNet2/projects/CenterNet2/')
@@ -106,10 +111,11 @@ def setup_cfgs(args):
 class MOTracker(object):
     def __init__(self, args):
         setup_logger(name="fvcore")
-        logger = setup_logger()
-        logger.info("Setup Arguments: " + str(args))
+        self.logger = setup_logger()
+        self.logger.info("Setup Arguments: " + str(args))
 
         self.deepsort_cfg, self.detic_cfg = setup_cfgs(args)
+        self.deepsort_conf_thresh = args.confidence_threshold
 
         deepsort_model, device = args.deepsort_model, args.device
         self.deepsort = DeepSort(deepsort_model,
@@ -138,11 +144,19 @@ class MOTracker(object):
         reset_cls_test(self.detic.model, classifier, num_classes)
 
     def perform_tracking(self, frames, preds):
-        video_visualizer = VideoVisualizer(self.metadata, self.instance_mode)
+        names = self.metadata.get("thing_classes", None)
+
         # Process detections
         tracked_frames, tracked_preds = [], []
         txt_preds = []
         for frame_idx, (frame, pred) in enumerate(zip(frames, preds)):  # detections per image
+            annotator = Annotator(frame, line_width=2, pil=not ascii)
+            
+            new_pred = Instances(pred.image_size)
+            pred_boxes = []
+            pred_classes = []
+            scores = []
+
             pred = pred.to(self.cpu_device)
             if pred is not None and len(pred):
                 # Print results
@@ -155,22 +169,23 @@ class MOTracker(object):
                 t4 = time.time()
                 outputs = self.deepsort.update(xywhs, confs, clss, frame)
                 t5 = time.time()
-
+                self.logger.info(f"DEEP Sort Performed ({frame_idx+1}/{len(frames)}) in {round((t5-t4)*1000)/1000}s")
                 # draw boxes for visualization
-                pred_boxes = np.array([])
-                thing_classes = np.array([])
                 if len(outputs) > 0:
                     for j, (output, conf) in enumerate(zip(outputs, confs)):
-
+                        if (conf < self.deepsort_conf_thresh):
+                            continue
                         bboxes = output[0:4]
                         id = output[4]
                         cls = output[5]
 
                         c = int(cls)  # integer class
-                        label = f'{id}-{c} {conf:.2f}'
-
-                        np.append(pred_boxes, bboxes)
-                        np.append(thing_classes, label)
+                        label = f'{id} {names[c]} {conf:.2f}'
+                        annotator.box_label(bboxes, label, color=colors(c, True))
+                        
+                        pred_boxes.append(bboxes)
+                        pred_classes.append(c)
+                        scores.append(conf)
 
                         # to MOT format
                         bbox_left = output[0]
@@ -180,16 +195,20 @@ class MOTracker(object):
                         # Write MOT compliant results to file
                         txt_preds.append(('%g ' * 10 + '\n') % (frame_idx + 1, id, bbox_left,  # MOT format
                                                             bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))
-                    pred.pred_boxes.tensor = torch.tensor(pred_boxes)
-                    pred.thing_classes = torch.tensor(thing_classes)
             else:
                 self.deepsort.increment_ages()
 
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            vis_frame = video_visualizer.draw_instance_predictions(frame, pred)
-            vis_frame = cv2.cvtColor(vis_frame.get_image(), cv2.COLOR_RGB2BGR)
+            new_pred.pred_boxes = Boxes(torch.tensor(np.array(pred_boxes)))
+            new_pred.pred_classes = torch.tensor(np.array(pred_classes))
+            new_pred.scores = torch.tensor(np.array(scores))
+            
+            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # vis_frame = video_visualizer.draw_instance_predictions(frame, new_pred)
+            # vis_frame = cv2.cvtColor(vis_frame.get_image(), cv2.COLOR_RGB2BGR)
+            vis_frame = cv2.cvtColor(annotator.result(), cv2.COLOR_BGR2RGB)
             tracked_frames.append(vis_frame)
-            tracked_preds.append(pred)
+            tracked_preds.append(new_pred)
+        
         return tracked_frames, txt_preds
 
     def _detic_process_video(self, video):
@@ -221,16 +240,14 @@ class MOTracker(object):
         for frame, pred in tqdm.tqdm(self._detic_process_video(video), total=num_frames):
             frames.append(frame)
             preds.append(pred)
-            if len(frames) > 50:
-                break
+            #if (len(frames) > 30):
+            #    break
         video.release()
 
         frames, preds = self.perform_tracking(frames, preds)
         return frames, preds
 
 def track(tracker, args):
-    save_dir = Path(os.path.join(args.project, args.name))
-    save_dir.mkdir(parents=True, exist_ok=True)
 
     video = cv2.VideoCapture(args.source)
     width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -243,6 +260,9 @@ def track(tracker, args):
     frames, preds = tracker.process_video(video)
 
     if (args.output):
+        save_dir = Path(args.output)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
         output_file_vid = os.path.join(args.output, basename)
         output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
         output_file_txt = os.path.join(args.output, basename)
