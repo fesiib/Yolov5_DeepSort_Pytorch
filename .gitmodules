@@ -9,3 +9,7 @@
 [submodule "Detic"]
 	path = Detic
 	url = https://github.com/facebookresearch/Detic
+
+[submodule "BYTETrack"]
+	path=ByteTrack
+	url= https://github.com/ifzhang/ByteTrack
