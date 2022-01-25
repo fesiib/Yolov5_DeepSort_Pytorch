@@ -229,8 +229,8 @@ class MOTracker(object):
         for frame, pred in tqdm.tqdm(self._detic_process_video(video), total=num_frames):
             frames.append(frame)
             preds.append(pred)
-            # if (len(frames) > 30):
-            #     break
+            if (len(frames) > 100):
+                break
         video.release()
 
         frames, preds = self.perform_tracking(frames, preds)
