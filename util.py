@@ -1,5 +1,5 @@
 from GPUtil import showUtilization as gpu_usage
-from numba import cuda
+#from numba import cuda
 import torch
 
 def free_gpu_cache():
@@ -8,14 +8,12 @@ def free_gpu_cache():
 
     torch.cuda.empty_cache()
 
-    cuda.select_device(0)
-    cuda.close()
-    cuda.select_device(0)
+    #cuda.select_device(0)
+    #cuda.close()
+    #cuda.select_device(0)
 
     print("GPU Usage after emptying the cache")
     gpu_usage()
-
-
 
 if __name__ == '__main__':
     free_gpu_cache()

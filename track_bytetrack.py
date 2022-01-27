@@ -35,7 +35,7 @@ sys.path.append('./Detic')
 from centernet.config import add_centernet_config
 from Detic.detic.config import add_detic_config
 from Detic.detic.modeling.utils import reset_cls_test
-from Detic.detic.predictor import BUILDIN_CLASSIFIER, BUILDIN_METADATA_PATH, get_clip_embeddings
+from Detic.detic.predictor import BUILDIN_CLASSIFIER, BUILDIN_METADATA_PATH
 
 
 FILE = Path(__file__).resolve()
@@ -52,18 +52,16 @@ def xyxy2xywh(x):
     y[:, 3] = x[:, 3] - x[:, 1]  # height
     return y
 
-
-def xywh2xyxy(x):
-    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
-    y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
-    y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
-    y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
-    y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom right y
-    return y
-
 def fix_detic_directory(detic_dir):
     return os.path.join(os.path.dirname(FILE), 'Detic', detic_dir)
+
+def get_clip_embeddings(vocabulary, prompt='a '):
+    from Detic.detic.modeling.text.text_encoder import build_text_encoder
+    text_encoder = build_text_encoder(pretrain=True)
+    text_encoder.eval()
+    texts = [prompt + x for x in vocabulary]
+    emb = text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
+    return emb
 
 def test_opencv_video_format(codec, file_ext):
     with tempfile.TemporaryDirectory(prefix="video_format_test") as dir:
@@ -108,7 +106,6 @@ class MOTracker(object):
     def __init__(self, args):
         setup_logger(name="fvcore")
         self.logger = setup_logger()
-        self.logger.info("Setup Arguments: " + str(args))
 
         self.detic_cfg = setup_cfg(args)
 
@@ -137,7 +134,8 @@ class MOTracker(object):
 
         # Process detections
         tracked_frames, tracked_preds = [], []
-        txt_preds = []
+        mot_preds = []
+        json_preds = []
         for frame_idx, (frame, pred) in enumerate(zip(frames, preds)):  # detections per image
             annotator = Annotator(frame, line_width=2, pil=not ascii)
             
@@ -167,12 +165,12 @@ class MOTracker(object):
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     for j, (output, conf, cls) in enumerate(zip(outputs, confs, clss)):
-                        tlwh = output.tlwh
-                        tlbr = [tlwh[0], tlwh[1], tlwh[0] + tlwh[2], tlwh[1] + tlwh[3]]
+                        tlhw = output.tlwh
+                        tlbr = [tlhw[0], tlhw[1], tlhw[0] + tlhw[2], tlhw[1] + tlhw[3]]
                         #print(tlwh, tlbr)
                         tid = output.track_id
-                        vertical = tlwh[2] / tlwh[3] > 1.6
-                        if tlwh[2] * tlwh[3] < self.min_box_area or vertical:
+                        vertical = tlhw[2] / tlhw[3] > 1.6
+                        if tlhw[2] * tlhw[3] < self.min_box_area or vertical:
                             continue
                         c = int(cls)  # integer class
                         label = f'{tid} {names[c]} {conf:.2f}'
@@ -182,10 +180,21 @@ class MOTracker(object):
                         pred_classes.append(c)
                         scores.append(conf)
 
+                        # to JSON format
+                        json_preds.append({
+                            "frame": frame_idx,
+                            "object_id": tid,
+                            "class_name": names[c],
+                            "top": tlhw[0],
+                            "left": tlhw[1],
+                            "height": tlhw[2],
+                            "width": tlhw[3],
+                        })
+
                         # to MOT format
                         # Write MOT compliant results to file
-                        txt_preds.append(('%g ' * 10 + '\n') % (frame_idx + 1, tid, tlwh[0],  # MOT format
-                                                            tlwh[1], tlwh[2], tlwh[3], -1, -1, -1, -1))
+                        mot_preds.append(('%g ' * 10 + '\n') % (frame_idx + 1, tid, tlhw[0],  # MOT format
+                                                            tlhw[1], tlhw[2], tlhw[3], -1, -1, -1, -1))
 
             new_pred.pred_boxes = Boxes(torch.tensor(np.array(pred_boxes)))
             new_pred.pred_classes = torch.tensor(np.array(pred_classes))
@@ -198,7 +207,7 @@ class MOTracker(object):
             tracked_frames.append(vis_frame)
             tracked_preds.append(new_pred)
         
-        return tracked_frames, txt_preds
+        return tracked_frames, mot_preds, json_preds
 
     def _detic_process_video(self, video):
         #video_visualizer = VideoVisualizer(self.metadata, self.instance_mode)
@@ -229,12 +238,12 @@ class MOTracker(object):
         for frame, pred in tqdm.tqdm(self._detic_process_video(video), total=num_frames):
             frames.append(frame)
             preds.append(pred)
-            if (len(frames) > 100):
-                break
+            # if (len(frames) > 10):
+            #     break
         video.release()
 
-        frames, preds = self.perform_tracking(frames, preds)
-        return frames, preds
+        frames, mot_preds, json_preds  = self.perform_tracking(frames, preds)
+        return frames, mot_preds, json_preds
 
 def track(tracker, args):
 
@@ -246,16 +255,26 @@ def track(tracker, args):
     codec, file_ext = (
         ("x264", ".mkv") if test_opencv_video_format("x264", ".mkv") else ("mp4v", ".mp4")
     )
-    frames, preds = tracker.process_video(video)
+    frames, mot_preds, json_preds = tracker.process_video(video)
 
     if (args.output):
-        save_dir = Path(args.output)
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        output_file_vid = os.path.join(args.output, basename)
+        output_id = 0
+        while True:
+            cur_output = args.output + str(output_id)
+            save_dir = Path(cur_output)
+            if save_dir.exists() is False:
+                save_dir.mkdir(parents=True, exist_ok=True)
+                break
+            output_id += 1
+        save_dir = args.output + str(output_id)
+        output_file_vid = os.path.join(save_dir, basename)
         output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
-        output_file_txt = os.path.join(args.output, basename)
+        
+        output_file_txt = os.path.join(save_dir, basename)
         output_file_txt = os.path.splitext(output_file_vid)[0] + '.txt'
+        
+        output_file_json = os.path.join(save_dir, basename)
+        output_file_json = os.path.splitext(output_file_vid)[0] + '.json'
 
         if os.path.isfile(output_file_vid):
             os.remove(output_file_vid)
@@ -272,13 +291,27 @@ def track(tracker, args):
             frameSize=(width, height),
             isColor=True,
         )
-        output_txt = open(output_file_txt, 'w')
         for vis_frame in frames:
             output_vid.write(vis_frame)
-        for pred in preds:
-            output_txt.write(pred)
-        output_txt.close()
         output_vid.release()
+
+        with open(output_file_txt, 'w') as f:
+            for pred in mot_preds:
+                f.write(pred)
+
+        json_data = {
+            "video_metadata": {
+                "fps": frames_per_second,
+                "width": width,
+                "height": height,
+                "codec": codec,
+                "file_ext": file_ext,
+                "original_name": basename,
+            },
+            "predictions": json_preds,
+        }
+        with open(output_file_json, "w") as f:
+            json.dump(json_data, fp=f, indent=4)
     return
 
 if __name__ == '__main__':
@@ -322,7 +355,7 @@ if __name__ == '__main__':
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
 
     parser.add_argument('--source', type=str, default='0', help='source')  # file/folder, 0 for webcam
-    parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
+    parser.add_argument('--output', type=str, default='inference/output', help='output folder prefix')  # output folder
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     #parser.add_argument('--save-vid', action='store_true', help='save video tracking results')
     #parser.add_argument('--save-txt', action='store_true', help='save MOT compliant results to *.txt')
@@ -333,6 +366,6 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
 
-    tracker = MOTracker(opt)
     with torch.no_grad():
+        tracker = MOTracker(opt)
         track(tracker, opt)
