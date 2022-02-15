@@ -312,6 +312,7 @@ def track(tracker, args):
         }
         with open(output_file_json, "w") as f:
             json.dump(json_data, fp=f, indent=4)
+        return json_data
     return
 
 if __name__ == '__main__':
