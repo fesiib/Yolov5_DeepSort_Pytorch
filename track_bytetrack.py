@@ -112,6 +112,7 @@ class MOTracker(object):
         self.bytetrack = BYTETracker(args, frame_rate=30)
         self.min_box_area = args.min_box_area
         
+        MetadataCatalog.clear()
         self.metadata = MetadataCatalog.get("__unused")
         self.instance_mode = ColorMode.IMAGE
         vocabulary = args.vocabulary
