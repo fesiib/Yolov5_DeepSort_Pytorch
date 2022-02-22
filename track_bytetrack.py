@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import uuid
 
 from ByteTrack.yolox.tracker.byte_tracker import BYTETracker
 
@@ -112,12 +113,12 @@ class MOTracker(object):
         self.bytetrack = BYTETracker(args, frame_rate=30)
         self.min_box_area = args.min_box_area
         
-        MetadataCatalog.clear()
-        self.metadata = MetadataCatalog.get("__unused")
         self.instance_mode = ColorMode.IMAGE
         vocabulary = args.vocabulary
+        self.metdata = None
         classifier = None
         if vocabulary == 'custom':
+            self.metadata = MetadataCatalog.get('__unused' + str(uuid.uuid4()))
             self.metadata.thing_classes = args.custom_vocabulary.split(',')
             classifier = get_clip_embeddings(self.metadata.thing_classes)
         else:
