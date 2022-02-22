@@ -193,6 +193,7 @@ class MOTracker(object):
                         # to JSON format
                         json_preds.append({
                             "frame": frame_idx,
+                            "confidence": conf, 
                             "object_id": tid,
                             "class_name": names[c],
                             "top": tlwh[1],
@@ -255,7 +256,7 @@ class MOTracker(object):
         frames, mot_preds, json_preds  = self.perform_tracking(frames, preds)
         return frames, mot_preds, json_preds
 
-def track(tracker, args):
+def track_mot(tracker, args):
 
     video = cv2.VideoCapture(args.source)
     width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -379,4 +380,4 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         tracker = MOTracker(opt)
-        track(tracker, opt)
+        track_mot(tracker, opt)

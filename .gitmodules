@@ -13,3 +13,7 @@
 [submodule "ByteTrack"]
 	path = ByteTrack
 	url = https://github.com/ifzhang/ByteTrack
+
+[submodule "mmtracking"]
+	path = mmtracking
+	url = https://github.com/open-mmlab/mmtracking
