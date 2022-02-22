@@ -165,13 +165,21 @@ class MOTracker(object):
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     for j, (output, conf, cls) in enumerate(zip(outputs, confs, clss)):
-                        tlhw = output.tlwh
-                        tlbr = [tlhw[0], tlhw[1], tlhw[0] + tlhw[2], tlhw[1] + tlhw[3]]
-                        #print(tlwh, tlbr)
-                        tid = output.track_id
-                        vertical = tlhw[2] / tlhw[3] > 1.6
-                        if tlhw[2] * tlhw[3] < self.min_box_area or vertical:
+                        tlbr = output.tlbr
+
+                        tlbr[0] = max(tlbr[0], 0)
+                        tlbr[1] = max(tlbr[1], 0)
+
+                        tlbr[2] = min(tlbr[2], img_size[1])
+                        tlbr[3] = min(tlbr[3], img_size[0])
+
+                        tlwh = [tlbr[0], tlbr[1], tlbr[2] - tlbr[0], tlbr[3] - tlbr[1]]
+
+                        #vertical = tlhw[2] / tlhw[3] > 1.6
+                        if tlwh[2] * tlwh[3] < self.min_box_area:
                             continue
+                        
+                        tid = output.track_id
                         c = int(cls)  # integer class
                         label = f'{tid} {names[c]} {conf:.2f}'
                         annotator.box_label(tlbr, label, color=colors(c, True))
@@ -185,16 +193,16 @@ class MOTracker(object):
                             "frame": frame_idx,
                             "object_id": tid,
                             "class_name": names[c],
-                            "top": tlhw[0],
-                            "left": tlhw[1],
-                            "height": tlhw[2],
-                            "width": tlhw[3],
+                            "top": tlwh[1],
+                            "left": tlwh[0],
+                            "height": tlwh[3],
+                            "width": tlwh[2],
                         })
 
                         # to MOT format
                         # Write MOT compliant results to file
-                        mot_preds.append(('%g ' * 10 + '\n') % (frame_idx + 1, tid, tlhw[0],  # MOT format
-                                                            tlhw[1], tlhw[2], tlhw[3], -1, -1, -1, -1))
+                        mot_preds.append(('%g ' * 10 + '\n') % (frame_idx + 1, tid, tlwh[0],  # MOT format
+                                                            tlwh[1], tlwh[2], tlwh[3], conf, -1, -1, -1))
 
             new_pred.pred_boxes = Boxes(torch.tensor(np.array(pred_boxes)))
             new_pred.pred_classes = torch.tensor(np.array(pred_classes))
