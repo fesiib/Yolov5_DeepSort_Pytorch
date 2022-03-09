@@ -165,7 +165,7 @@ def process_file_mot():
 
 def launch_server():
 
-    app.run(host="0.0.0.0", port=7778)
+    app.run(host="0.0.0.0", port=7777)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
