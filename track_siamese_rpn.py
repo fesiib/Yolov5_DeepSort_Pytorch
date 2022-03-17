@@ -14,6 +14,7 @@ import json
 import numpy
 
 from mmtracking.mmtrack.apis import inference_sot, init_model
+from util import segment_scenes
 
 sys.path.insert(0, './yolov5')
 from yolov5.utils.plots import Annotator, colors
@@ -108,6 +109,21 @@ def track_sot(args):
     basename = os.path.basename(args.source)
     codec, file_ext = ("mp4v", ".mp4")
 
+    if (args.output is None):
+        args.output = os.path.join(".", "backup")
+
+    output_id = 0
+    while True:
+        cur_output = args.output + str(output_id)
+        save_dir = Path(cur_output)
+        if save_dir.exists() is False:
+            save_dir.mkdir(parents=True, exist_ok=True)
+            break
+        output_id += 1
+    save_dir = args.output + str(output_id)
+
+    scene_ranges = segment_scenes(args.source, save_dir, save_dir)
+
     json_data = {
         "video_metadata": {
             "fps": frames_per_second,
@@ -117,6 +133,7 @@ def track_sot(args):
             "file_ext": file_ext,
             "original_name": basename,
         },
+        "scene_ranges": scene_ranges,
         "predictions": [],
         "status": "successful"
     }
@@ -162,60 +179,51 @@ def track_sot(args):
         result_preds_json.extend(cur_preds_json)
         result_preds_mot.extend(cur_preds_mot)
     
-    if (args.output):
-        output_id = 0
-        while True:
-            cur_output = args.output + str(output_id)
-            save_dir = Path(cur_output)
-            if save_dir.exists() is False:
-                save_dir.mkdir(parents=True, exist_ok=True)
-                break
-            output_id += 1
-        save_dir = args.output + str(output_id)
-        output_file_vid = os.path.join(save_dir, basename)
-        output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
-        
-        output_file_txt = os.path.join(save_dir, basename)
-        output_file_txt = os.path.splitext(output_file_txt)[0] + '.txt'
-        
-        output_file_json = os.path.join(save_dir, basename)
-        output_file_json = os.path.splitext(output_file_json)[0] + '.json'
+    
+    output_file_vid = os.path.join(save_dir, basename)
+    output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
+    
+    output_file_txt = os.path.join(save_dir, basename)
+    output_file_txt = os.path.splitext(output_file_txt)[0] + '.txt'
+    
+    output_file_json = os.path.join(save_dir, basename)
+    output_file_json = os.path.splitext(output_file_json)[0] + '.json'
 
-        init_frame_file = os.path.join(save_dir, basename)
-        init_frame_file = os.path.splitext(init_frame_file)[0] + '.jpg'
+    init_frame_file = os.path.join(save_dir, basename)
+    init_frame_file = os.path.splitext(init_frame_file)[0] + '.jpg'
 
-        if os.path.isfile(output_file_vid):
-            os.remove(output_file_vid)
-        
-        if os.path.isfile(output_file_txt):
-            os.remove(output_file_txt)
+    if os.path.isfile(output_file_vid):
+        os.remove(output_file_vid)
+    
+    if os.path.isfile(output_file_txt):
+        os.remove(output_file_txt)
 
-        if os.path.isfile(init_frame_file):
-            os.remove(init_frame_file)
+    if os.path.isfile(init_frame_file):
+        os.remove(init_frame_file)
 
-        cv2.imwrite(init_frame_file, result_frames[init_frame_idx])    
+    cv2.imwrite(init_frame_file, result_frames[init_frame_idx])    
 
-        output_vid = cv2.VideoWriter(
-            filename=output_file_vid,
-            # some installation of opencv may not support x264 (due to its license),
-            # you can try other format (e.g. MPEG)
-            fourcc=cv2.VideoWriter_fourcc(*codec),
-            fps=float(frames_per_second),
-            frameSize=(width, height),
-            isColor=True,
-        )
-        for vis_frame in result_frames:
-            output_vid.write(vis_frame)
-        output_vid.release()
+    output_vid = cv2.VideoWriter(
+        filename=output_file_vid,
+        # some installation of opencv may not support x264 (due to its license),
+        # you can try other format (e.g. MPEG)
+        fourcc=cv2.VideoWriter_fourcc(*codec),
+        fps=float(frames_per_second),
+        frameSize=(width, height),
+        isColor=True,
+    )
+    for vis_frame in result_frames:
+        output_vid.write(vis_frame)
+    output_vid.release()
 
-        with open(output_file_txt, 'w') as f:
-            for pred in result_preds_mot:
-                f.write(pred)
+    with open(output_file_txt, 'w') as f:
+        for pred in result_preds_mot:
+            f.write(pred)
 
-        json_data["predictions"] = result_preds_json
+    json_data["predictions"] = result_preds_json
 
-        with open(output_file_json, "w") as f:
-            json.dump(json_data, fp=f, indent=4)
+    with open(output_file_json, "w") as f:
+        json.dump(json_data, fp=f, indent=4)
 
     return json_data
 

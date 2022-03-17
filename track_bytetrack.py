@@ -38,6 +38,8 @@ from Detic.detic.config import add_detic_config
 from Detic.detic.modeling.utils import reset_cls_test
 from Detic.detic.predictor import BUILDIN_CLASSIFIER, BUILDIN_METADATA_PATH
 
+from util import segment_scenes
+
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]
@@ -267,65 +269,74 @@ def track_mot(tracker, args):
     codec, file_ext = (
         ("x264", ".mkv") if test_opencv_video_format("x264", ".mkv") else ("mp4v", ".mp4")
     )
+
+    if (args.output is None):
+        args.output = os.path.join(".", "backup")
+    output_id = 0
+    while True:
+        cur_output = args.output + str(output_id)
+        save_dir = Path(cur_output)
+        if save_dir.exists() is False:
+            save_dir.mkdir(parents=True, exist_ok=True)
+            break
+        output_id += 1
+    save_dir = args.output + str(output_id)
+
+    scene_ranges = segment_scenes(args.source, save_dir, save_dir)
+
+    json_data = {
+        "video_metadata": {
+            "fps": frames_per_second,
+            "width": width,
+            "height": height,
+            "codec": codec,
+            "file_ext": file_ext,
+            "original_name": basename,
+        },
+        "scene_ranges": scene_ranges,
+        "predictions": [],
+        "status": "successful"
+    }
+
     frames, mot_preds, json_preds = tracker.process_video(video)
 
-    if (args.output):
-        output_id = 0
-        while True:
-            cur_output = args.output + str(output_id)
-            save_dir = Path(cur_output)
-            if save_dir.exists() is False:
-                save_dir.mkdir(parents=True, exist_ok=True)
-                break
-            output_id += 1
-        save_dir = args.output + str(output_id)
-        output_file_vid = os.path.join(save_dir, basename)
-        output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
-        
-        output_file_txt = os.path.join(save_dir, basename)
-        output_file_txt = os.path.splitext(output_file_vid)[0] + '.txt'
-        
-        output_file_json = os.path.join(save_dir, basename)
-        output_file_json = os.path.splitext(output_file_vid)[0] + '.json'
+    output_file_vid = os.path.join(save_dir, basename)
+    output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
+    
+    output_file_txt = os.path.join(save_dir, basename)
+    output_file_txt = os.path.splitext(output_file_vid)[0] + '.txt'
+    
+    output_file_json = os.path.join(save_dir, basename)
+    output_file_json = os.path.splitext(output_file_vid)[0] + '.json'
 
-        if os.path.isfile(output_file_vid):
-            os.remove(output_file_vid)
-        
-        if os.path.isfile(output_file_txt):
-            os.remove(output_file_txt)
+    if os.path.isfile(output_file_vid):
+        os.remove(output_file_vid)
+    
+    if os.path.isfile(output_file_txt):
+        os.remove(output_file_txt)
 
-        output_vid = cv2.VideoWriter(
-            filename=output_file_vid,
-            # some installation of opencv may not support x264 (due to its license),
-            # you can try other format (e.g. MPEG)
-            fourcc=cv2.VideoWriter_fourcc(*codec),
-            fps=float(frames_per_second),
-            frameSize=(width, height),
-            isColor=True,
-        )
-        for vis_frame in frames:
-            output_vid.write(vis_frame)
-        output_vid.release()
+    output_vid = cv2.VideoWriter(
+        filename=output_file_vid,
+        # some installation of opencv may not support x264 (due to its license),
+        # you can try other format (e.g. MPEG)
+        fourcc=cv2.VideoWriter_fourcc(*codec),
+        fps=float(frames_per_second),
+        frameSize=(width, height),
+        isColor=True,
+    )
+    for vis_frame in frames:
+        output_vid.write(vis_frame)
+    output_vid.release()
 
-        with open(output_file_txt, 'w') as f:
-            for pred in mot_preds:
-                f.write(pred)
+    with open(output_file_txt, 'w') as f:
+        for pred in mot_preds:
+            f.write(pred)
 
-        json_data = {
-            "video_metadata": {
-                "fps": frames_per_second,
-                "width": width,
-                "height": height,
-                "codec": codec,
-                "file_ext": file_ext,
-                "original_name": basename,
-            },
-            "predictions": json_preds,
-        }
-        with open(output_file_json, "w") as f:
-            json.dump(json_data, fp=f, indent=4)
-        return json_data
-    return
+    json_data["predictions"] = json_preds
+
+    with open(output_file_json, "w") as f:
+        json.dump(json_data, fp=f, indent=4)
+    return json_data
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
