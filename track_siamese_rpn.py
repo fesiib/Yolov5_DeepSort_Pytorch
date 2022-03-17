@@ -28,16 +28,14 @@ def read_video(video):
             break
     return frames
 
-def process_result(frame, frame_idx, tlwh, conf):
+def process_result(frame, frame_idx, tlbr, conf):
     # conf = -1 for init-frame-idx == frame-idx
-    tlwh = numpy.float64(tlwh)
+    tlbr = numpy.float64(tlbr)
     conf = numpy.float64(conf)
 
     img_height, img_width = frame.shape[0], frame.shape[1]
 
     annotator = Annotator(frame, line_width=2, pil=not ascii)
-
-    tlbr = [tlwh[0], tlwh[1], tlwh[2] - tlwh[0], tlwh[3] - tlwh[1]]
 
     tlbr[0] = max(tlbr[0], 0)
     tlbr[1] = max(tlbr[1], 0)

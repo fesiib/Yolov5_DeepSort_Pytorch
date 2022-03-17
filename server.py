@@ -41,9 +41,14 @@ def process_link_sot():
         return json.dumps(fail_with("No Object to Track"))
     
     object_rectangle = request.form["object_rectangle"]
+    frame_id = 0
+    
+    if 'frame_id' in request.form:
+        frame_id = request.form["frame_id"]
 
     args.source = video_link
     args.gt_bbox = object_rectangle
+    args.init_frame_idx = frame_id
 
     if 'gpu' in request.form and request.form["gpu"] == "true":
         args.device = 'cuda:0'
@@ -73,12 +78,17 @@ def process_file_sot():
     if 'object_rectangle' not in request.form:
         return json.dumps(fail_with("No Object to Track"))
     object_rectangle = request.form["object_rectangle"]
+    frame_id = 0
+    
+    if 'frame_id' in request.form:
+        frame_id = request.form["frame_id"]
 
     with tempfile.TemporaryDirectory() as td:
         temp_path = Path(td) / video_file.filename
         video_file.save(temp_path)
         args.source = str(temp_path)
         args.gt_bbox = object_rectangle
+        args.init_frame_idx = frame_id
 
         if 'gpu' in request.form and request.form["gpu"] == "true":
             args.device = 'cuda:0'
