@@ -163,10 +163,12 @@ class MOTracker(object):
                 t4 = time.time()
                 outputs = self.bytetrack.update(inputs, info_img, img_size)
                 t5 = time.time()
-                self.logger.info(f"DEEP Sort Performed ({frame_idx+1}/{len(frames)}) in {round((t5-t4)*1000)/1000}s")
+                self.logger.info(f"BYTETrack Performed ({frame_idx+1}/{len(frames)}) in {round((t5-t4)*1000)/1000}s")
                 # draw boxes for visualization
                 if len(outputs) > 0:
-                    for j, (output, conf, cls) in enumerate(zip(outputs, confs, clss)):
+                    for j, (output, _conf, _cls) in enumerate(zip(outputs, confs, clss)):
+                        cls = int(_cls)
+                        conf = float(_conf)
                         tlbr = output.tlbr
 
                         tlbr[0] = max(tlbr[0], 0)
@@ -182,12 +184,11 @@ class MOTracker(object):
                             continue
                         
                         tid = output.track_id
-                        c = int(cls)  # integer class
-                        label = f'{tid} {names[c]} {conf:.2f}'
-                        annotator.box_label(tlbr, label, color=colors(c, True))
+                        label = f'{tid} {names[cls]} {conf:.2f}'
+                        annotator.box_label(tlbr, label, color=colors(cls, True))
                         
                         pred_boxes.append(tlbr)
-                        pred_classes.append(c)
+                        pred_classes.append(cls)
                         scores.append(conf)
 
                         # to JSON format
@@ -195,7 +196,7 @@ class MOTracker(object):
                             "frame": frame_idx,
                             "confidence": conf, 
                             "object_id": tid,
-                            "class_name": names[c],
+                            "class_name": names[cls],
                             "top": tlwh[1],
                             "left": tlwh[0],
                             "height": tlwh[3],

@@ -29,6 +29,7 @@ def read_video(video):
     return frames
 
 def process_result(frame, frame_idx, tlwh, conf):
+    # conf = -1 for init-frame-idx == frame-idx
     tlwh = numpy.float64(tlwh)
     conf = numpy.float64(conf)
 
@@ -66,6 +67,41 @@ def process_result(frame, frame_idx, tlwh, conf):
     result_frame = annotator.result()
     return result_frame, result_pred_mot, result_pred_json
 
+def process_video(args, frames, start_frame_idx, end_frame_idx):
+    result_frames = []
+    result_preds_json = []
+    result_preds_mot = []
+
+    # build the model from a config file and a checkpoint file
+    model = init_model(args.config_sot, args.checkpoint_sot, device=args.device)
+
+    prog_bar = mmcv.ProgressBar(abs(end_frame_idx - start_frame_idx))
+
+    inc = 1
+    if start_frame_idx > end_frame_idx:
+        inc = -1
+
+    # test and show/save the images
+    for i in range(start_frame_idx, end_frame_idx, inc):
+        frame = frames[i]
+        if i == start_frame_idx:
+            init_bboxes = list(map(float, args.gt_bbox.split(',')))
+            init_bboxes[2] += init_bboxes[0]
+            init_bboxes[3] += init_bboxes[1]
+        frame_idx = abs(i - start_frame_idx)
+        result = inference_sot(model, frame, init_bboxes, frame_id=frame_idx)
+        
+        result_frame, result_pred_mot, result_pred_json = process_result(
+            frame, i, result["track_bboxes"][:4], result["track_bboxes"][4]
+        )
+
+        result_frames.append(result_frame)
+        result_preds_json.append(result_pred_json)
+        result_preds_mot.append(result_pred_mot)
+        prog_bar.update()
+
+    return result_frames, result_preds_json, result_preds_mot
+
 def track_sot(args):
     video = cv2.VideoCapture(args.source)
     width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -74,30 +110,59 @@ def track_sot(args):
     basename = os.path.basename(args.source)
     codec, file_ext = ("mp4v", ".mp4")
 
-    # build the model from a config file and a checkpoint file
-    model = init_model(args.config_sot, args.checkpoint_sot, device=args.device)
+    json_data = {
+        "video_metadata": {
+            "fps": frames_per_second,
+            "width": width,
+            "height": height,
+            "codec": codec,
+            "file_ext": file_ext,
+            "original_name": basename,
+        },
+        "predictions": [],
+        "status": "successful"
+    }
+
+    init_frame_idx = int(args.init_frame_idx)
+    frames = read_video(video)
+
+    print(init_frame_idx)
+
+    if init_frame_idx < 0 or init_frame_idx >= len(frames):
+        json_data["status"] = "failed, initial frame is incorrect " + init_frame_idx
+        return json_data
 
     result_frames = []
     result_preds_json = []
     result_preds_mot = []
 
-    frames = read_video(video)
-
-    prog_bar = mmcv.ProgressBar(len(frames))
-    # test and show/save the images
-    for i, frame in enumerate(frames):
-        if i == 0:
-            init_bboxes = list(map(float, args.gt_bbox.split(',')))
-            init_bboxes[2] += init_bboxes[0]
-            init_bboxes[3] += init_bboxes[1]
-        result = inference_sot(model, frame, init_bboxes, frame_id=i)
+    if init_frame_idx > 0:
+        print("Backwards Processing:")
+        cur_frames, cur_preds_json, cur_preds_mot = process_video(
+            args, frames, init_frame_idx, -1
+        )
+        cur_frames = cur_frames[::-1]
+        cur_preds_json = cur_preds_json[::-1]
+        cur_preds_mot = cur_preds_mot[::-1]
         
-        result_frame, result_pred_mot, result_pred_json = process_result(frame, i, result["track_bboxes"][:4], result["track_bboxes"][4])
+        result_frames.extend(cur_frames)
+        result_preds_json.extend(cur_preds_json)
+        result_preds_mot.extend(cur_preds_mot)
+    
+    if init_frame_idx < len(frames) - 1:
+        print("Forward processing:")
+        cur_frames, cur_preds_json, cur_preds_mot = process_video(
+            args, frames, init_frame_idx, len(frames)
+        )
 
-        result_frames.append(result_frame)
-        result_preds_json.append(result_pred_json)
-        result_preds_mot.append(result_pred_mot)
-        prog_bar.update()
+        if len(result_frames) > 0:
+            result_frames.pop()
+            result_preds_json.pop()
+            result_preds_mot.pop()
+
+        result_frames.extend(cur_frames)
+        result_preds_json.extend(cur_preds_json)
+        result_preds_mot.extend(cur_preds_mot)
     
     if (args.output):
         output_id = 0
@@ -113,16 +178,24 @@ def track_sot(args):
         output_file_vid = os.path.splitext(output_file_vid)[0] + file_ext
         
         output_file_txt = os.path.join(save_dir, basename)
-        output_file_txt = os.path.splitext(output_file_vid)[0] + '.txt'
+        output_file_txt = os.path.splitext(output_file_txt)[0] + '.txt'
         
         output_file_json = os.path.join(save_dir, basename)
-        output_file_json = os.path.splitext(output_file_vid)[0] + '.json'
+        output_file_json = os.path.splitext(output_file_json)[0] + '.json'
+
+        init_frame_file = os.path.join(save_dir, basename)
+        init_frame_file = os.path.splitext(init_frame_file)[0] + '.jpg'
 
         if os.path.isfile(output_file_vid):
             os.remove(output_file_vid)
         
         if os.path.isfile(output_file_txt):
             os.remove(output_file_txt)
+
+        if os.path.isfile(init_frame_file):
+            os.remove(init_frame_file)
+
+        cv2.imwrite(init_frame_file, result_frames[init_frame_idx])    
 
         output_vid = cv2.VideoWriter(
             filename=output_file_vid,
@@ -141,21 +214,12 @@ def track_sot(args):
             for pred in result_preds_mot:
                 f.write(pred)
 
-        json_data = {
-            "video_metadata": {
-                "fps": frames_per_second,
-                "width": width,
-                "height": height,
-                "codec": codec,
-                "file_ext": file_ext,
-                "original_name": basename,
-            },
-            "predictions": result_preds_json,
-        }
+        json_data["predictions"] = result_preds_json
+
         with open(output_file_json, "w") as f:
             json.dump(json_data, fp=f, indent=4)
-        return json_data
-    return
+
+    return json_data
 
 
 
@@ -167,7 +231,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', default="inference/output", help='output video file (mp4 format)')
     parser.add_argument(
         '--device', default='cuda:0', help='Device used for inference')
-    parser.add_argument('--gt_bbox', help='Ground Truth Bounding Box')
+    parser.add_argument('--gt-bbox', help='Ground Truth Bounding Box')
+    parser.add_argument('--init-frame-idx', default=0, help='Ground Truth Bounding Box')
     args = parser.parse_args()
 
     with torch.no_grad():
