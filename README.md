@@ -23,6 +23,8 @@ CUDA_LAUNCH_BLOCKING=1 python track_bytetrack.py --confidence-threshold 0.2 --de
 ```
 CUDA_LAUNCH_BLOCKING=1 python track_detic.py --confidence-threshold 0.2 --device cuda:0  --vocabulary lvis  --source ./dataset/demo_video/demo-1.mp4 --opts MODEL.WEIGHTS ./models/Detic_LCOCOI21k_CLIP_SwinB_896b32_4x_ft4x_max-size.pth
 ```
+Custom Vocabulary does not seem to work because of META_ARCH issues.
+
 
 <hr/>
 
