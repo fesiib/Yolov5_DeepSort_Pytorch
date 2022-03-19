@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import uuid
 
 sys.path.insert(0, './yolov5')
 
@@ -126,18 +127,21 @@ class MOTracker(object):
                             nn_budget=self.deepsort_cfg.DEEPSORT.NN_BUDGET,
                             use_cuda=(device != 'cpu'))
         
-        self.metadata = MetadataCatalog.get("__unused")
         self.instance_mode = ColorMode.IMAGE
         vocabulary = args.vocabulary
+        self.metdata = None
         classifier = None
         if vocabulary == 'custom':
+            self.metadata = MetadataCatalog.get('__unused' + str(uuid.uuid4()))
             self.metadata.thing_classes = args.custom_vocabulary.split(',')
+            print(self.metadata)
             classifier = get_clip_embeddings(self.metadata.thing_classes)
         else:
             self.metadata = MetadataCatalog.get(
                 BUILDIN_METADATA_PATH[vocabulary]
             )
             classifier = fix_detic_directory(BUILDIN_CLASSIFIER[vocabulary])
+
         num_classes = len(self.metadata.thing_classes)
         self.cpu_device = torch.device("cpu")
         self.detic = DefaultPredictor(self.detic_cfg)
